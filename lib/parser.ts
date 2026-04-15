@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
+const pdfParseMod = require('pdf-parse');
+const pdfParse = pdfParseMod.default ?? pdfParseMod;
 
 export interface ParsedReceipt {
   orderId: string;
