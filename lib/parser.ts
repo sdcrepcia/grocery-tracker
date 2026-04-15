@@ -88,12 +88,17 @@ export async function parseReceiptPdf(buffer: Buffer): Promise<ParsedReceipt> {
     throw new Error(`Failed to parse receipt. Extracted: store=${store}, orderId=${orderId}, date=${orderDate}`);
   }
 
+  // Fall back to summing line items if no Total: line was matched
+  const resolvedTotal = total > 0
+    ? total
+    : parseFloat(items.reduce((s, i) => s + i.totalPrice, 0).toFixed(2));
+
   return {
     orderId,
     store,
     orderDate,
     itemCount: itemCount || items.length,
-    total,
+    total: resolvedTotal,
     items,
   };
 }
