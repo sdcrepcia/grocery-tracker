@@ -37,17 +37,24 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [itemNames, setItemNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [receiptsRes, itemsRes] = await Promise.all([
-      fetch('/api/receipts'),
-      fetch('/api/items'),
-    ]);
-    const receiptsData = await receiptsRes.json();
-    const itemsData = await itemsRes.json();
-    setData(receiptsData);
-    setItemNames(itemsData.names ?? []);
-    setLoading(false);
+    try {
+      const [receiptsRes, itemsRes] = await Promise.all([
+        fetch('/api/receipts'),
+        fetch('/api/items'),
+      ]);
+      const receiptsData = await receiptsRes.json();
+      const itemsData = await itemsRes.json();
+      if (receiptsData.error) throw new Error(receiptsData.error);
+      setData(receiptsData);
+      setItemNames(itemsData.names ?? []);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -56,6 +63,14 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <p className="text-gray-400 text-sm">Loading...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <p className="text-red-500 text-sm">Error: {error}</p>
       </div>
     );
   }
