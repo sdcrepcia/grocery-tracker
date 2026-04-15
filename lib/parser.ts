@@ -87,7 +87,7 @@ export async function parseReceiptPdf(buffer: Buffer): Promise<ParsedReceipt> {
   }
 
   if (!orderId || !orderDate || !store) {
-    throw new Error(`Failed to parse receipt. Extracted: store=${store}, orderId=${orderId}, date=${orderDate}`);
+    throw new Error(`Failed to parse receipt. Extracted: store=${store}, orderId=${orderId}, date=${orderDate} | Lines: ${lines.slice(0, 15).join(' || ')}`);
   }
 
   return {
