@@ -41,7 +41,7 @@ export default async function ItemPage({
   const { name } = await params;
   const itemName = decodeURIComponent(name);
 
-  const history: Purchase[] = await sql`
+  const history = await sql`
     SELECT
       li.name,
       li.quantity::text,
@@ -54,7 +54,7 @@ export default async function ItemPage({
     JOIN receipts r ON r.id = li.receipt_id
     WHERE li.name ILIKE ${itemName}
     ORDER BY r.order_date ASC
-  `;
+  ` as Purchase[];
 
   if (history.length === 0) {
     return (
