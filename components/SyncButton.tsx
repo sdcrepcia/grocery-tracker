@@ -9,7 +9,7 @@ interface Props {
 
 export default function SyncButton({ onSynced }: Props) {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [result, setResult] = useState<{ imported: number; skipped: number; errors: string[]; emailsFound: number } | null>(null);
 
   async function sync() {
     setLoading(true);
@@ -32,11 +32,18 @@ export default function SyncButton({ onSynced }: Props) {
         {loading ? 'Syncing...' : 'Sync Now'}
       </button>
       {result && (
-        <span className="text-sm text-gray-500">
+        <div className="text-sm text-gray-500">
           {result.imported > 0
             ? `Imported ${result.imported} new receipt${result.imported !== 1 ? 's' : ''}`
-            : 'Already up to date'}
-        </span>
+            : result.emailsFound === 0
+              ? 'No matching emails found'
+              : `Found ${result.emailsFound} email${result.emailsFound !== 1 ? 's' : ''}, imported 0`}
+          {result.errors.length > 0 && (
+            <ul className="mt-1 text-red-500 text-xs">
+              {result.errors.map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );

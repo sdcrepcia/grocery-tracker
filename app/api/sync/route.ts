@@ -20,6 +20,7 @@ export async function POST() {
   let imported = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const emailsFound = emails.length;
 
   for (const email of emails) {
     try {
@@ -55,7 +56,7 @@ export async function POST() {
   // Update last synced timestamp
   await sql`UPDATE sync_state SET last_synced_at = NOW() WHERE id = 1`;
 
-  return NextResponse.json({ imported, skipped, errors });
+  return NextResponse.json({ imported, skipped, errors, emailsFound });
 }
 
 // Vercel Cron calls GET
