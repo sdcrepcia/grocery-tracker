@@ -7,10 +7,19 @@ export async function GET(req: NextRequest) {
   const name = req.nextUrl.searchParams.get('name');
 
     if (!name) {
-      const names = await sql`
-        SELECT DISTINCT name FROM line_items ORDER BY name
+      const rows = await sql`
+        SELECT
+          name,
+          COUNT(*)::int          AS times_bought,
+          SUM(total_price)::text AS total_spent
+        FROM line_items
+        GROUP BY name
+        ORDER BY times_bought DESC
       `;
-      return NextResponse.json({ names: names.map((r: any) => r.name) });
+      return NextResponse.json({
+        names: rows.map((r: any) => r.name),
+        allItems: rows,
+      });
     }
 
     const history = await sql`

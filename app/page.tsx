@@ -4,13 +4,15 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { ShoppingCart, TrendingUp, Calendar, AlertCircle } from 'lucide-react';
 import SpendChart from '@/components/SpendChart';
+import MonthlySpendChart from '@/components/MonthlySpendChart';
+import MostBoughtChart from '@/components/MostBoughtChart';
 import ItemPriceChart from '@/components/ItemPriceChart';
 import SyncButton from '@/components/SyncButton';
 
 interface DashboardData {
   receipts: any[];
   weeklySpend: { week_start: string; total: number }[];
-  topItems: { name: string; times_bought: number; total_spent: number; avg_price: number }[];
+  topItems: { name: string; times_bought: number; total_spent: number; avg_price: number; min_price: number; max_price: number }[];
   lastSyncedAt: string | null;
   gmailConnected: boolean;
 }
@@ -36,8 +38,10 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [itemNames, setItemNames] = useState<string[]>([]);
+  const [allItems, setAllItems] = useState<{ name: string; times_bought: number; total_spent: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [spendView, setSpendView] = useState<'weekly' | 'monthly'>('weekly');
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +54,7 @@ export default function Dashboard() {
       if (receiptsData.error) throw new Error(receiptsData.error);
       setData(receiptsData);
       setItemNames(itemsData.names ?? []);
+      setAllItems(itemsData.allItems ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -95,6 +100,18 @@ export default function Dashboard() {
   const monthDelta = lastMonthTotal > 0
     ? ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100
     : null;
+
+  const priceWatch = data.topItems
+    .filter((i) => i.times_bought >= 2 && Number(i.max_price) > Number(i.min_price))
+    .map((i) => ({
+      name: i.name,
+      min: Number(i.min_price),
+      max: Number(i.max_price),
+      avg: Number(i.avg_price),
+      swingPct: ((Number(i.max_price) - Number(i.min_price)) / Number(i.min_price)) * 100,
+    }))
+    .sort((a, b) => b.swingPct - a.swingPct)
+    .slice(0, 8);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -169,29 +186,56 @@ export default function Dashboard() {
             <div className="bg-white rounded-xl border border-gray-100 p-6">
               <div className="flex items-center gap-2 mb-4">
                 <TrendingUp size={16} className="text-green-600" />
-                <h2 className="font-semibold text-gray-800">Weekly Spend</h2>
-                <span className="text-xs text-gray-400 ml-auto">last 16 weeks</span>
+                <h2 className="font-semibold text-gray-800">Spending Trends</h2>
+                <div className="ml-auto flex rounded-lg border border-gray-200 overflow-hidden text-xs">
+                  <button
+                    onClick={() => setSpendView('weekly')}
+                    className={`px-3 py-1 transition-colors ${spendView === 'weekly' ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    onClick={() => setSpendView('monthly')}
+                    className={`px-3 py-1 transition-colors ${spendView === 'monthly' ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Monthly
+                  </button>
+                </div>
               </div>
-              {data.weeklySpend.length > 0 ? (
-                <SpendChart data={data.weeklySpend} />
+              {spendView === 'weekly' ? (
+                data.weeklySpend.length > 0
+                  ? <SpendChart data={data.weeklySpend} />
+                  : <p className="text-sm text-gray-400 py-8 text-center">Need more data to show trends.</p>
               ) : (
-                <p className="text-sm text-gray-400 py-8 text-center">Need more data to show trends.</p>
+                <MonthlySpendChart receipts={data.receipts} />
               )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl border border-gray-100 p-6">
+                <h2 className="font-semibold text-gray-800 mb-4">Most Bought Items</h2>
+                <MostBoughtChart allItems={allItems} />
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <h2 className="font-semibold text-gray-800 mb-4">Item Price History</h2>
                 <ItemPriceChart itemNames={itemNames} />
               </div>
+            </div>
 
+            <div className="grid md:grid-cols-2 gap-6">
               <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <h2 className="font-semibold text-gray-800 mb-4">Top Items by Spend</h2>
                 <ul className="space-y-2">
                   {data.topItems.slice(0, 10).map((item: any) => (
                     <li key={item.name} className="flex items-center justify-between text-sm">
                       <div className="min-w-0">
-                        <span className="text-gray-800 truncate block">{item.name}</span>
+                        <Link
+                          href={`/item/${encodeURIComponent(item.name)}`}
+                          className="text-gray-800 truncate block hover:text-green-600 transition-colors"
+                        >
+                          {item.name}
+                        </Link>
                         <span className="text-gray-400 text-xs">
                           {item.times_bought}x · avg {formatDollar(item.avg_price)}
                         </span>
@@ -203,6 +247,33 @@ export default function Dashboard() {
                   ))}
                 </ul>
               </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 p-6">
+                <h2 className="font-semibold text-gray-800 mb-4">Price Watch</h2>
+                {priceWatch.length === 0 ? (
+                  <p className="text-sm text-gray-400">Not enough repeat purchases to show price changes.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {priceWatch.map((item) => (
+                      <li key={item.name} className="flex items-center justify-between text-sm">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-gray-800 truncate block">{item.name}</span>
+                          <span className="text-gray-400 text-xs">
+                            ${item.min.toFixed(2)} – ${item.max.toFixed(2)} · avg ${item.avg.toFixed(2)}
+                          </span>
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ml-4 shrink-0 ${
+                          item.swingPct >= 25 ? 'bg-red-50 text-red-600' :
+                          item.swingPct >= 10 ? 'bg-amber-50 text-amber-600' :
+                          'bg-gray-50 text-gray-500'
+                        }`}>
+                          {item.swingPct.toFixed(0)}% range
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 p-6">
@@ -211,7 +282,7 @@ export default function Dashboard() {
                 <h2 className="font-semibold text-gray-800">Order History</h2>
               </div>
               <div className="space-y-3">
-                {data.receipts.slice(0, 10).map((receipt: any) => (
+                {data.receipts.map((receipt: any) => (
                   <details key={receipt.id} className="group border border-gray-100 rounded-lg">
                     <summary className="flex items-center justify-between px-4 py-3 cursor-pointer list-none hover:bg-gray-50 rounded-lg">
                       <div className="flex items-center gap-3">
@@ -228,7 +299,12 @@ export default function Dashboard() {
                       {receipt.items?.map((item: any) => (
                         <li key={item.id} className="flex justify-between text-sm text-gray-600">
                           <span>
-                            {item.name}{' '}
+                            <Link
+                              href={`/item/${encodeURIComponent(item.name)}`}
+                              className="hover:text-green-600 transition-colors"
+                            >
+                              {item.name}
+                            </Link>{' '}
                             <span className="text-gray-400">{item.quantity}{item.unit}</span>
                           </span>
                           <span>{formatDollar(item.total_price)}</span>

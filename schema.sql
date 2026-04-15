@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS sync_state (
 -- Seed sync_state row so we can UPDATE instead of INSERT
 INSERT INTO sync_state (id) VALUES (1) ON CONFLICT DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS item_categories (
+  id       SERIAL PRIMARY KEY,
+  name     TEXT NOT NULL UNIQUE,
+  keywords TEXT NOT NULL DEFAULT ''  -- comma-separated, case-insensitive substring matches
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_line_items_receipt_id ON line_items(receipt_id);
 CREATE INDEX IF NOT EXISTS idx_line_items_name ON line_items(name);
