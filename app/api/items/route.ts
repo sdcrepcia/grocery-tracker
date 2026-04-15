@@ -4,8 +4,7 @@ import sql from '@/lib/db';
 // GET /api/items?name=Beef+Strip+Steak
 // Returns price history for a specific item across all receipts
 export async function GET(req: NextRequest) {
-  try {
-    const name = req.nextUrl.searchParams.get('name');
+  const name = req.nextUrl.searchParams.get('name');
 
     if (!name) {
       const names = await sql`
@@ -30,7 +29,4 @@ export async function GET(req: NextRequest) {
     `;
 
     return NextResponse.json({ history });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
-  }
 }

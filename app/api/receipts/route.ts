@@ -4,7 +4,6 @@ import sql from '@/lib/db';
 // GET /api/receipts
 // Returns all receipts with their line items, plus computed weekly/monthly aggregates
 export async function GET() {
-  try {
   const receipts = await sql`
     SELECT
       r.id,
@@ -66,7 +65,4 @@ export async function GET() {
     lastSyncedAt: syncState?.last_synced_at ?? null,
     gmailConnected: !!syncState?.refresh_token,
   });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
-  }
 }
