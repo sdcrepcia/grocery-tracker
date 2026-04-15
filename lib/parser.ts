@@ -1,4 +1,5 @@
-import { PDFParse } from 'pdf-parse';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse');
 
 export interface ParsedReceipt {
   orderId: string;
@@ -30,8 +31,7 @@ const ORDER_RE = /^Order #(\d+)$/;
 const TOTAL_RE = /^Total:\s+\$(\d+\.\d{2})$/;
 
 export async function parseReceiptPdf(buffer: Buffer): Promise<ParsedReceipt> {
-  const parser = new PDFParse({ data: buffer });
-  const data = await parser.getText();
+  const data = await pdfParse(buffer);
   const lines = data.text
     .split('\n')
     .map((l: string) => l.trim())
