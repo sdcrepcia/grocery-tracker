@@ -15,12 +15,11 @@ export interface ParsedItem {
   totalPrice: number;
 }
 
-// Matches lines like: "Beef Strip Steak 0.55lb $10.44"
-// or:                 "Chobani Non-Fat Greek Yogurt Plain 1ct $1.79"
-const LINE_ITEM_RE = /^(.+?)\s+([\d.]+)(lb|ct)\s+\$(\d+\.\d{2})$/;
+// Matches lines like: "Beef Strip Steak0.55lb$10.44" or "Avocados2ct$2.00"
+const LINE_ITEM_RE = /^(.+?)([\d.]+)(lb|ct)\$(\d+\.\d{2})$/;
 
-// Matches: "4/4/2026 10:07AM"
-const DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{4})\s+\d{1,2}:\d{2}[AP]M$/;
+// Matches: "4/4/2026 10:07 AM" (space before AM/PM)
+const DATE_RE = /^(\d{1,2}\/\d{1,2}\/\d{4})\s+\d{1,2}:\d{2}\s+[AP]M$/;
 
 // Matches: "Order #4244594"
 const ORDER_RE = /^Order #(\d+)$/;
@@ -68,10 +67,9 @@ export async function parseReceiptPdf(buffer: Buffer): Promise<ParsedReceipt> {
       continue;
     }
 
-    // Skip summary lines
-    if (line.startsWith('Order Summary')) {
-      const countMatch = line.match(/(\d+) line items/);
-      if (countMatch) itemCount = parseInt(countMatch[1], 10);
+    const countMatch = line.match(/^(\d+) line items$/);
+    if (countMatch) {
+      itemCount = parseInt(countMatch[1], 10);
       continue;
     }
 
@@ -87,7 +85,7 @@ export async function parseReceiptPdf(buffer: Buffer): Promise<ParsedReceipt> {
   }
 
   if (!orderId || !orderDate || !store) {
-    throw new Error(`Failed to parse receipt. Extracted: store=${store}, orderId=${orderId}, date=${orderDate} | Lines: ${lines.slice(0, 15).join(' || ')}`);
+    throw new Error(`Failed to parse receipt. Extracted: store=${store}, orderId=${orderId}, date=${orderDate}`);
   }
 
   return {
