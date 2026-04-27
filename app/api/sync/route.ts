@@ -21,15 +21,10 @@ export async function POST() {
   // Step 1: list all matching Gmail message IDs (cheap — no PDF download)
   const allMessageIds = await listReceiptEmailIds(syncState.refresh_token);
 
-  // Step 2: filter to IDs not yet in the DB
-  const existingIds = allMessageIds.length > 0
-    ? (await sql`
-        SELECT gmail_message_id FROM receipts
-        WHERE gmail_message_id = ANY(${allMessageIds}::text[])
-      `).map((r: any) => r.gmail_message_id as string)
-    : [];
-
-  const newMessageIds = allMessageIds.filter((id) => !existingIds.includes(id));
+  // Step 2: fetch all known gmail_message_ids from DB, filter in JS
+  const knownRows = await sql`SELECT gmail_message_id FROM receipts WHERE gmail_message_id IS NOT NULL`;
+  const knownIds = new Set(knownRows.map((r: any) => r.gmail_message_id as string));
+  const newMessageIds = allMessageIds.filter((id) => !knownIds.has(id));
 
   let imported = 0;
   let skipped = allMessageIds.length - newMessageIds.length;
