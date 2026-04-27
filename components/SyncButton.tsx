@@ -14,11 +14,22 @@ export default function SyncButton({ onSynced }: Props) {
   async function sync() {
     setLoading(true);
     setResult(null);
-    const res = await fetch('/api/sync', { method: 'POST' });
-    const data = await res.json();
-    setResult(data);
-    setLoading(false);
-    if (data.imported > 0) onSynced();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90_000);
+      const res = await fetch('/api/sync', { method: 'POST', signal: controller.signal });
+      clearTimeout(timeout);
+      const data = await res.json();
+      setResult(data);
+      if (data.imported > 0) onSynced();
+    } catch (err: any) {
+      setResult({
+        imported: 0, skipped: 0, emailsFound: 0,
+        errors: [err.name === 'AbortError' ? 'Sync timed out — try again' : err.message],
+      });
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

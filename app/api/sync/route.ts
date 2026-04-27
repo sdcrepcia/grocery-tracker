@@ -36,39 +36,53 @@ export async function POST() {
   const errors: string[] = [];
   const emailsFound = allMessageIds.length;
 
-  // Step 3: only download PDFs for emails we haven't seen before
-  for (const messageId of newMessageIds) {
-    try {
-      const email = await fetchReceiptEmail(syncState.refresh_token, messageId);
-      if (!email) { skipped++; continue; }
+  // Step 3: download PDFs in parallel (max 5 concurrent to avoid Gmail rate limits)
+  const CONCURRENCY = 5;
+  for (let i = 0; i < newMessageIds.length; i += CONCURRENCY) {
+    const batch = newMessageIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map((id) => fetchReceiptEmail(syncState.refresh_token, id)),
+    );
 
-      const receipt = await parseReceiptPdf(email.pdfBuffer);
+    for (let j = 0; j < batch.length; j++) {
+      const messageId = batch[j];
+      const result = results[j];
 
-      // Also guard against duplicate order IDs (belt-and-suspenders)
-      const [existing] = await sql`SELECT id FROM receipts WHERE order_id = ${receipt.orderId}`;
-      if (existing) {
-        // Backfill the gmail_message_id so future syncs skip this via the fast path
-        await sql`UPDATE receipts SET gmail_message_id = ${messageId} WHERE order_id = ${receipt.orderId}`;
-        skipped++;
+      if (result.status === 'rejected') {
+        errors.push(`Email ${messageId}: ${result.reason?.message ?? result.reason}`);
         continue;
       }
 
-      const [inserted] = await sql`
-        INSERT INTO receipts (order_id, store, order_date, total, item_count, gmail_message_id)
-        VALUES (${receipt.orderId}, ${receipt.store}, ${receipt.orderDate.toISOString()}, ${receipt.total}, ${receipt.itemCount}, ${messageId})
-        RETURNING id
-      `;
+      const email = result.value;
+      if (!email) { skipped++; continue; }
 
-      for (const item of receipt.items) {
-        await sql`
-          INSERT INTO line_items (receipt_id, name, quantity, unit, total_price)
-          VALUES (${inserted.id}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.totalPrice})
+      try {
+        const receipt = await parseReceiptPdf(email.pdfBuffer);
+
+        const [existing] = await sql`SELECT id FROM receipts WHERE order_id = ${receipt.orderId}`;
+        if (existing) {
+          await sql`UPDATE receipts SET gmail_message_id = ${messageId} WHERE order_id = ${receipt.orderId}`;
+          skipped++;
+          continue;
+        }
+
+        const [inserted] = await sql`
+          INSERT INTO receipts (order_id, store, order_date, total, item_count, gmail_message_id)
+          VALUES (${receipt.orderId}, ${receipt.store}, ${receipt.orderDate.toISOString()}, ${receipt.total}, ${receipt.itemCount}, ${messageId})
+          RETURNING id
         `;
-      }
 
-      imported++;
-    } catch (err: any) {
-      errors.push(`Email ${messageId}: ${err.message}`);
+        for (const item of receipt.items) {
+          await sql`
+            INSERT INTO line_items (receipt_id, name, quantity, unit, total_price)
+            VALUES (${inserted.id}, ${item.name}, ${item.quantity}, ${item.unit}, ${item.totalPrice})
+          `;
+        }
+
+        imported++;
+      } catch (err: any) {
+        errors.push(`Email ${messageId}: ${err.message}`);
+      }
     }
   }
 
