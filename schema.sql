@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS receipts (
   order_date  TIMESTAMPTZ NOT NULL,
   total       NUMERIC(10,2) NOT NULL,
   item_count  INTEGER NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  gmail_message_id TEXT UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS line_items (

@@ -1,42 +1,61 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
-import { fetchNewReceiptEmails } from '@/lib/gmail';
+import { listReceiptEmailIds, fetchReceiptEmail } from '@/lib/gmail';
 import { parseReceiptPdf } from '@/lib/parser';
+
+export const maxDuration = 60;
 
 // Called by Vercel Cron daily, or manually from the UI
 export async function POST() {
-  // Verify cron secret if called by Vercel (skip for manual UI calls in dev)
-  // In production, Vercel automatically adds the CRON_SECRET header
-
   const [syncState] = await sql`SELECT refresh_token, last_synced_at FROM sync_state WHERE id = 1`;
 
   if (!syncState?.refresh_token) {
     return NextResponse.json({ error: 'Gmail not connected. Visit /setup to authorize.' }, { status: 401 });
   }
 
-  // Fetch all receipt emails, then filter to ones we haven't imported yet
-  const emails = await fetchNewReceiptEmails(syncState.refresh_token);
+  // Auto-migrate: add gmail_message_id column if it doesn't exist yet
+  await sql`
+    ALTER TABLE receipts ADD COLUMN IF NOT EXISTS gmail_message_id TEXT UNIQUE
+  `;
+
+  // Step 1: list all matching Gmail message IDs (cheap — no PDF download)
+  const allMessageIds = await listReceiptEmailIds(syncState.refresh_token);
+
+  // Step 2: filter to IDs not yet in the DB
+  const existingIds = allMessageIds.length > 0
+    ? (await sql`
+        SELECT gmail_message_id FROM receipts
+        WHERE gmail_message_id = ANY(${allMessageIds}::text[])
+      `).map((r: any) => r.gmail_message_id as string)
+    : [];
+
+  const newMessageIds = allMessageIds.filter((id) => !existingIds.includes(id));
 
   let imported = 0;
-  let skipped = 0;
+  let skipped = allMessageIds.length - newMessageIds.length;
   const errors: string[] = [];
-  const emailsFound = emails.length;
+  const emailsFound = allMessageIds.length;
 
-  for (const email of emails) {
+  // Step 3: only download PDFs for emails we haven't seen before
+  for (const messageId of newMessageIds) {
     try {
+      const email = await fetchReceiptEmail(syncState.refresh_token, messageId);
+      if (!email) { skipped++; continue; }
+
       const receipt = await parseReceiptPdf(email.pdfBuffer);
 
-      // Skip if already imported
+      // Also guard against duplicate order IDs (belt-and-suspenders)
       const [existing] = await sql`SELECT id FROM receipts WHERE order_id = ${receipt.orderId}`;
       if (existing) {
+        // Backfill the gmail_message_id so future syncs skip this via the fast path
+        await sql`UPDATE receipts SET gmail_message_id = ${messageId} WHERE order_id = ${receipt.orderId}`;
         skipped++;
         continue;
       }
 
-      // Insert receipt then line items sequentially
       const [inserted] = await sql`
-        INSERT INTO receipts (order_id, store, order_date, total, item_count)
-        VALUES (${receipt.orderId}, ${receipt.store}, ${receipt.orderDate.toISOString()}, ${receipt.total}, ${receipt.itemCount})
+        INSERT INTO receipts (order_id, store, order_date, total, item_count, gmail_message_id)
+        VALUES (${receipt.orderId}, ${receipt.store}, ${receipt.orderDate.toISOString()}, ${receipt.total}, ${receipt.itemCount}, ${messageId})
         RETURNING id
       `;
 
@@ -49,11 +68,10 @@ export async function POST() {
 
       imported++;
     } catch (err: any) {
-      errors.push(`Email ${email.id}: ${err.message}`);
+      errors.push(`Email ${messageId}: ${err.message}`);
     }
   }
 
-  // Update last synced timestamp
   await sql`UPDATE sync_state SET last_synced_at = NOW() WHERE id = 1`;
 
   return NextResponse.json({ imported, skipped, errors, emailsFound });
@@ -61,7 +79,6 @@ export async function POST() {
 
 // Vercel Cron calls GET
 export async function GET(req: Request) {
-  // Validate cron secret in production
   const authHeader = req.headers.get('authorization');
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

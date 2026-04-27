@@ -33,50 +33,47 @@ export interface GmailMessage {
   receivedAt: Date;
 }
 
-export async function fetchNewReceiptEmails(refreshToken: string, lastHistoryId?: string): Promise<GmailMessage[]> {
+// Returns just the Gmail message IDs matching receipt emails — no PDF download.
+export async function listReceiptEmailIds(refreshToken: string): Promise<string[]> {
   const client = getOAuthClient();
   client.setCredentials({ refresh_token: refreshToken });
-
   const gmail = google.gmail({ version: 'v1', auth: client });
-  const results: GmailMessage[] = [];
-
-  // Search for Heinen's receipt emails not yet processed
-  const query = 'subject:"Your Order is Ready for Pickup" from:heinens.com';
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: query,
+    q: 'subject:"Your Order is Ready for Pickup" from:heinens.com',
     maxResults: 50,
   });
 
-  const messages = listRes.data.messages ?? [];
+  return (listRes.data.messages ?? []).map((m) => m.id!).filter(Boolean);
+}
 
-  for (const msg of messages) {
-    if (!msg.id) continue;
+// Downloads and returns one receipt email's PDF. Call only for message IDs not yet imported.
+export async function fetchReceiptEmail(
+  refreshToken: string,
+  messageId: string,
+): Promise<GmailMessage | null> {
+  const client = getOAuthClient();
+  client.setCredentials({ refresh_token: refreshToken });
+  const gmail = google.gmail({ version: 'v1', auth: client });
 
-    const fullMsg = await gmail.users.messages.get({
-      userId: 'me',
-      id: msg.id,
-      format: 'full',
-    });
+  const fullMsg = await gmail.users.messages.get({
+    userId: 'me',
+    id: messageId,
+    format: 'full',
+  });
 
-    const payload = fullMsg.data.payload;
-    if (!payload) continue;
+  const payload = fullMsg.data.payload;
+  if (!payload) return null;
 
-    // Get email date
-    const dateHeader = payload.headers?.find((h) => h.name === 'Date')?.value ?? '';
-    const receivedAt = dateHeader ? new Date(dateHeader) : new Date();
+  const dateHeader = payload.headers?.find((h) => h.name === 'Date')?.value ?? '';
+  const receivedAt = dateHeader ? new Date(dateHeader) : new Date();
+  const subject = payload.headers?.find((h) => h.name === 'Subject')?.value ?? '';
 
-    // Find PDF attachment
-    const pdfBuffer = await findPdfAttachment(gmail, msg.id, payload);
-    if (!pdfBuffer) continue;
+  const pdfBuffer = await findPdfAttachment(gmail, messageId, payload);
+  if (!pdfBuffer) return null;
 
-    const subject = payload.headers?.find((h) => h.name === 'Subject')?.value ?? '';
-
-    results.push({ id: msg.id, pdfBuffer, subject, receivedAt });
-  }
-
-  return results;
+  return { id: messageId, pdfBuffer, subject, receivedAt };
 }
 
 async function findPdfAttachment(
