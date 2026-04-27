@@ -19,7 +19,9 @@ export default function SyncButton({ onSynced }: Props) {
       const timeout = setTimeout(() => controller.abort(), 90_000);
       const res = await fetch('/api/sync', { method: 'POST', signal: controller.signal });
       clearTimeout(timeout);
-      const data = await res.json();
+      const text = await res.text();
+      if (!text) throw new Error(`Server returned empty response (HTTP ${res.status})`);
+      const data = JSON.parse(text);
       setResult(data);
       if (data.imported > 0) onSynced();
     } catch (err: any) {
