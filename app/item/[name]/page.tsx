@@ -1,6 +1,6 @@
 import sql from '@/lib/db';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import ItemDetailChart from '@/components/ItemDetailChart';
 
 interface Purchase {
@@ -31,6 +31,29 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
     </div>
   );
+}
+
+function linearRegression(points: { x: number; y: number }[]) {
+  const n = points.length;
+  if (n < 2) return null;
+
+  const sumX = points.reduce((s, p) => s + p.x, 0);
+  const sumY = points.reduce((s, p) => s + p.y, 0);
+  const sumXY = points.reduce((s, p) => s + p.x * p.y, 0);
+  const sumXX = points.reduce((s, p) => s + p.x * p.x, 0);
+
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return null;
+
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+
+  const yMean = sumY / n;
+  const ssTot = points.reduce((s, p) => s + (p.y - yMean) ** 2, 0);
+  const ssRes = points.reduce((s, p) => s + (p.y - (slope * p.x + intercept)) ** 2, 0);
+  const r2 = ssTot < 0.0001 ? 1 : Math.max(0, 1 - ssRes / ssTot);
+
+  return { slope, intercept, r2 };
 }
 
 export default async function ItemPage({
@@ -70,7 +93,6 @@ export default async function ItemPage({
   }
 
   const isWeightItem = history[0].unit === 'lb';
-  // Use unit_price for weight items ($/lb), total_price for count items
   const prices = history.map((h) =>
     Number(isWeightItem ? h.unit_price : h.total_price),
   );
@@ -88,12 +110,68 @@ export default async function ItemPage({
   const minIdx = prices.indexOf(minPrice);
   const maxIdx = prices.indexOf(maxPrice);
 
-  const chartPoints = history.map((h) => ({
+  // Linear regression for price forecasting
+  const firstTimestamp = new Date(history[0].order_date).getTime();
+  const regressionPoints = history.map((h) => ({
+    x: (new Date(h.order_date).getTime() - firstTimestamp) / 86400000,
+    y: Number(isWeightItem ? h.unit_price : h.total_price),
+  }));
+
+  const regression = history.length >= 3 ? linearRegression(regressionPoints) : null;
+  const trendPerMonth = regression ? regression.slope * 30 : 0;
+
+  const confidence = !regression ? 'none'
+    : regression.r2 > 0.65 && history.length >= 5 ? 'high'
+    : regression.r2 > 0.3 && history.length >= 3 ? 'medium'
+    : 'low';
+
+  const nowOffset = (Date.now() - firstTimestamp) / 86400000;
+  const est30 = regression
+    ? Math.max(0, regression.slope * (nowOffset + 30) + regression.intercept)
+    : null;
+  const est60 = regression
+    ? Math.max(0, regression.slope * (nowOffset + 60) + regression.intercept)
+    : null;
+
+  // Build chart data: historical points with trend value, then forecast points
+  const chartPoints = history.map((h, i) => ({
     date: formatDate(h.order_date),
-    price: Number(isWeightItem ? h.unit_price : h.total_price),
+    price: Number(isWeightItem ? h.unit_price : h.total_price) as number | undefined,
     qty: `${Number(h.quantity)}${h.unit}`,
     totalPrice: Number(h.total_price),
+    trend: regression
+      ? parseFloat((regression.slope * regressionPoints[i].x + regression.intercept).toFixed(2))
+      : undefined,
+    isForecast: false,
   }));
+
+  if (regression && est30 !== null && est60 !== null) {
+    chartPoints.push(
+      {
+        date: '+30 days',
+        price: undefined,
+        qty: '',
+        totalPrice: 0,
+        trend: parseFloat(est30.toFixed(2)),
+        isForecast: true,
+      },
+      {
+        date: '+60 days',
+        price: undefined,
+        qty: '',
+        totalPrice: 0,
+        trend: parseFloat(est60.toFixed(2)),
+        isForecast: true,
+      },
+    );
+  }
+
+  const confidenceConfig = {
+    high:   { label: 'High',   color: 'text-green-600',  bg: 'bg-green-50'  },
+    medium: { label: 'Medium', color: 'text-amber-600',  bg: 'bg-amber-50'  },
+    low:    { label: 'Low',    color: 'text-gray-500',   bg: 'bg-gray-100'  },
+    none:   { label: '—',      color: 'text-gray-400',   bg: 'bg-gray-50'   },
+  }[confidence];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -141,16 +219,71 @@ export default async function ItemPage({
           />
         </div>
 
+        {regression && est30 !== null && (
+          <div className="bg-white rounded-xl border border-gray-100 p-6">
+            <h2 className="font-semibold text-gray-800 mb-4">Price Forecast</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Monthly Trend</p>
+                <div className="flex items-center gap-1.5">
+                  {Math.abs(trendPerMonth) < 0.01 ? (
+                    <Minus size={16} className="text-gray-400" />
+                  ) : trendPerMonth > 0 ? (
+                    <TrendingUp size={16} className="text-red-500" />
+                  ) : (
+                    <TrendingDown size={16} className="text-green-600" />
+                  )}
+                  <span className={`text-xl font-bold ${
+                    Math.abs(trendPerMonth) < 0.01 ? 'text-gray-500' :
+                    trendPerMonth > 0 ? 'text-red-500' : 'text-green-600'
+                  }`}>
+                    {trendPerMonth > 0 ? '+' : ''}{formatDollar(trendPerMonth)}/mo
+                  </span>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Est. in 30 Days</p>
+                <p className="text-xl font-bold text-gray-900">{formatDollar(est30)}</p>
+                {est60 !== null && (
+                  <p className="text-xs text-gray-400 mt-0.5">60 days: {formatDollar(est60)}</p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Confidence</p>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${confidenceConfig.bg} ${confidenceConfig.color}`}>
+                  {confidenceConfig.label}
+                </span>
+                <p className="text-xs text-gray-400 mt-1">{history.length} purchases · R²={regression.r2.toFixed(2)}</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-4 border-t border-gray-50 pt-3">
+              Linear trend from {history.length} purchases. Low confidence = high price volatility, not necessarily a bad predictor of direction.
+            </p>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl border border-gray-100 p-6">
-          <h2 className="font-semibold text-gray-800 mb-1">
-            Price History
-            {isWeightItem && (
-              <span className="text-xs font-normal text-gray-400 ml-2">per lb</span>
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="font-semibold text-gray-800">
+              Price History
+              {isWeightItem && (
+                <span className="text-xs font-normal text-gray-400 ml-2">per lb</span>
+              )}
+            </h2>
+            {regression && (
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-6 h-0.5 bg-green-600 rounded" />
+                  Actual
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-6 h-0.5 bg-amber-400 rounded" style={{ borderTop: '2px dashed #fbbf24', height: 0 }} />
+                  Trend
+                </span>
+              </div>
             )}
-          </h2>
-          <p className="text-xs text-gray-400 mb-4">
-            avg {formatDollar(avgPrice)}{isWeightItem ? '/lb' : ''}
-          </p>
+          </div>
+          <p className="text-xs text-gray-400 mb-4">avg {formatDollar(avgPrice)}{isWeightItem ? '/lb' : ''}</p>
           <ItemDetailChart
             data={chartPoints}
             avgPrice={avgPrice}

@@ -13,9 +13,11 @@ import {
 
 interface ChartPoint {
   date: string;
-  price: number;
+  price?: number;
   qty: string;
   totalPrice: number;
+  trend?: number;
+  isForecast?: boolean;
 }
 
 interface Props {
@@ -24,7 +26,50 @@ interface Props {
   isWeightItem: boolean;
 }
 
+function CustomDot(props: any) {
+  const { cx, cy, payload } = props;
+  if (!payload.isForecast) return null;
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={5}
+      fill="white"
+      stroke="#f59e0b"
+      strokeWidth={2}
+    />
+  );
+}
+
+function CustomTooltip({ active, payload, label, isWeightItem }: any) {
+  if (!active || !payload?.length) return null;
+
+  const priceEntry = payload.find((p: any) => p.dataKey === 'price');
+  const trendEntry = payload.find((p: any) => p.dataKey === 'trend');
+  const point = payload[0]?.payload as ChartPoint;
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-sm px-3 py-2 text-xs">
+      <p className="font-medium text-gray-700 mb-1">{label}</p>
+      {priceEntry && priceEntry.value != null && (
+        <p className="text-green-700">
+          {`$${Number(priceEntry.value).toFixed(2)}${isWeightItem ? '/lb' : ''}`}
+          {point.qty ? ` (${point.qty})` : ''}
+        </p>
+      )}
+      {trendEntry && trendEntry.value != null && (
+        <p className="text-amber-600">
+          {point.isForecast ? 'Forecast' : 'Trend'}: ${Number(trendEntry.value).toFixed(2)}
+          {isWeightItem ? '/lb' : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ItemDetailChart({ data, avgPrice, isWeightItem }: Props) {
+  const hasTrend = data.some((d) => d.trend != null);
+
   return (
     <ResponsiveContainer width="100%" height={240}>
       <LineChart data={data} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
@@ -36,12 +81,7 @@ export default function ItemDetailChart({ data, avgPrice, isWeightItem }: Props)
           width={46}
           domain={['auto', 'auto']}
         />
-        <Tooltip
-          formatter={(value: any, _: any, entry: any) => [
-            `$${Number(value).toFixed(2)}${isWeightItem ? '/lb' : ''} (${entry.payload.qty})`,
-            'Price',
-          ]}
-        />
+        <Tooltip content={<CustomTooltip isWeightItem={isWeightItem} />} />
         <ReferenceLine
           y={avgPrice}
           stroke="#d1d5db"
@@ -60,7 +100,20 @@ export default function ItemDetailChart({ data, avgPrice, isWeightItem }: Props)
           strokeWidth={2}
           dot={{ r: 4, fill: '#16a34a' }}
           activeDot={{ r: 6 }}
+          connectNulls={false}
         />
+        {hasTrend && (
+          <Line
+            type="monotone"
+            dataKey="trend"
+            stroke="#f59e0b"
+            strokeWidth={1.5}
+            strokeDasharray="5 5"
+            dot={<CustomDot />}
+            activeDot={false}
+            connectNulls={true}
+          />
+        )}
       </LineChart>
     </ResponsiveContainer>
   );
